@@ -1,0 +1,220 @@
+---
+- hosts: all
+  become: true
+  gather_facts: no
+
+  vars:
+     password: $1$SomeSalt$m5t2E6//FsmDiIs5bRR1A.
+
+  tasks:
+   - name: install python 2
+     raw: test -e /usr/bin/python || (sudo apt -y update && sudo apt install -y python-minimal)
+
+   - name: gather facts
+     setup:   
+
+   - name: install aptitude
+     raw: sudo apt-get -y install aptitude
+      
+   - name: Update the ubuntu server
+     become: true
+     apt:
+       upgrade: yes
+       update_cache: yes
+       
+   - name: Update the ubuntu server dist
+     apt:
+       upgrade: dist
+       update_cache: yes
+      
+   - name: Install the necessary Packages
+     apt:
+       name: "{{ item }}"
+       state: latest
+       update_cache: yes
+     with_items:
+       - build-essential
+       - dkms
+       - unzip
+       - wget
+       - python-pip
+       - python-dev
+       - git 
+       - make 
+       - vim 
+       - python-dev 
+       - python-pip 
+       - libffi-dev 
+       - libssl-dev 
+       - libxml2-dev 
+       - libxslt1-dev 
+       - libjpeg8-dev 
+       - zlib1g-dev
+       - vagrant
+   
+   - name: Add the oracle public key
+     apt_key:
+        url: https://www.virtualbox.org/download/oracle_vbox_2016.asc
+        state: present
+        
+   - name: Add the oracle public key for older versions
+     apt_key:
+        url: https://www.virtualbox.org/download/oracle_vbox.asc
+        state: present
+        
+   - name: Add VirtualBox repo
+     apt_repository:
+        repo: 'deb http://download.virtualbox.org/virtualbox/debian xenial contrib'
+        state: present
+        update_cache: yes
+        
+   - name: Install pexpect
+     pip:
+       name: pexpect
+      
+   - name: update the software sources
+     become: true
+     apt:
+       upgrade: yes
+       update_cache: yes
+       
+   - name: Install virtualbox in given version
+     apt:
+       name: virtualbox-5.0
+       state: present
+       
+   - name: Adding users to the virtualbox groups
+     user: 
+        name: ubuntu
+        group: vboxusers
+        append: yes
+        password: $1$SomeSalt$m5t2E6//FsmDiIs5bRR1A.
+        
+   - name: Check if virtualbox kernels are loaded or not
+     service:
+        name: vboxdrv
+        state: started
+        
+   - name: Check if extension pack is already installed or not
+     shell: "VBoxManage list extpacks"
+     register: extpack_list
+     
+   - name: Download latest Extension pack
+     get_url:
+       url: http://download.virtualbox.org/virtualbox/5.0.24/Oracle_VM_VirtualBox_Extension_Pack-5.0.24-108355.vbox-extpack
+       dest: /home/ubuntu/Oracle_VM_VirtualBox_Extension_Pack-5.0.24-108355.vbox-extpack
+ 
+   - name: Install extension pack
+     expect:
+        command: "VBoxManage extpack install --replace /home/ubuntu/Oracle_VM_VirtualBox_Extension_Pack-5.0.24-108355.vbox-extpack"
+        responses:
+            Do you agree to these license terms and conditions (y/n)? : y
+     when: 'extpack_list.stdout == "Extension Packs: 0"'
+     
+   - name: Install the necessary Packages
+     apt:
+       name: "{{ item }}"
+       state: latest
+       update_cache: yes
+     with_items:
+       - apache2 
+       - php 
+       - php-mysql 
+       - libapache2-mod-php 
+       - php-soap 
+       - php-xml
+   
+   - name: Create tmp folder
+     file:
+       path: /tmp/phpbox
+       state: directory
+       mode: 0777
+       
+   - name: Create apache folder
+     file:
+       path: /var/www/html/phpvirtualbox/
+       state: directory
+       mode: 0777
+   
+   - name: Download phpvirtualbox
+     get_url:
+       url: https://sourceforge.net/projects/phpvirtualbox/files/phpvirtualbox-5.0-5.zip
+       dest: /home/ubuntu/phpvirtualbox-5.0-5.zip
+       
+   - name: Unzip the downloaded folder
+     unarchive:
+        src: /home/ubuntu/phpvirtualbox-5.0-5.zip
+        dest: /tmp/phpbox/
+        remote_src: true
+   
+   - name: Check if file is there
+     stat:
+        path: /var/www/html/phpvirtualbox/config.php
+     register: st
+   
+   - name: If files not there in phpvirtualbox then move
+     shell: mv /tmp/phpbox/phpvirtualbox-5.0-5/* /var/www/html/phpvirtualbox/
+     when: st.stat.exists == False
+      
+   - name: Copy phpVirtualBox config.php file
+     copy: 
+       src: /var/www/html/phpvirtualbox/config.php-example
+       dest: /var/www/html/phpvirtualbox/config.php
+       remote_src: true       
+
+   - name: Edit config.php to add username
+     lineinfile:
+       path: /var/www/html/phpvirtualbox/config.php
+       regexp: "username = '[^']+';"
+       line: "var $username = 'ubuntu';"
+       
+   - name: Edit config.php to add username
+     lineinfile:
+       path: /var/www/html/phpvirtualbox/config.php
+       regexp: "password = '[^']+';"
+       line: "var $password = 'demotest';"
+       
+   - name: Create a new file /etc/default/virtualbox
+     file:
+       path: /etc/default/virtualbox
+       state: touch
+   
+   - name: Adding user
+     lineinfile:
+       path: /etc/default/virtualbox
+       regexp: '^VBOXWEB_USER='
+       line: "VBOXWEB_USER=ubuntu"
+       
+   - name: Restart services vboxweb-service
+     service:
+        name: vboxweb-service
+        state: restarted
+        
+   - name: Restart services vboxdrv
+     service:
+        name: vboxdrv
+        state: restarted
+    
+   - name: Restart services apache2
+     service:
+        name: apache2
+        state: restarted
+
+   - name: Creating a new vagrant vm - Make dir for new VB 
+     file:
+       path: /home/ubuntu/trusty32
+       state: directory
+       mode: 0777
+
+   - name: Initialize vagrant 
+     command: vagrant init ubuntu/trusty32
+     become_user: ubuntu
+
+   - name: Update Vagrant file
+     template:
+       src: Vagrantfile
+       dest: /home/ubuntu/trusty32/Vagrantfile
+
+   - name: Go to the folder and execute vagrant up
+     command: chdir=/home/ubuntu/trusty32 vagrant up
+     become_user: ubuntu     
